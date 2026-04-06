@@ -1,0 +1,17 @@
+name: Daily Job Alert
+on:
+  schedule:
+    - cron: '00 05 * * *'  # 9:00 AM GST (UTC+4 = 05:00 UTC)
+    - cron: '00 11 * * *'  # 3:00 PM GST (UTC+4 = 11:00 UTC)
+  workflow_dispatch:        # allows manual trigger too
+
+jobs:
+  send-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger job alert
+        run: |
+          curl -X POST https://api.anthropic.com/v1/messages \
+          -H "x-api-key: ${{ secrets.ANTHROPIC_API_KEY }}" \
+          -H "Content-Type: application/json" \
+          -d '{"model":"claude-sonnet-4-20250514","max_tokens":100,"messages":[{"role":"user","content":"ping"}]}'
