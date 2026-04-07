@@ -14,22 +14,38 @@ jobs:
       - name: Call Claude API and get job alert content
         id: claude
         run: |
+          cat > /tmp/payload.json << 'JSONEOF'
+          {
+            "model": "claude-3-5-haiku-20241022",
+            "max_tokens": 1024,
+            "messages": [
+              {
+                "role": "user",
+                "content": "Generate a daily job alert summary for software engineering roles. Include 3-5 trending job titles, key skills in demand, and a motivational tip for job seekers. Keep it concise and professional."
+              }
+            ]
+          }
+          JSONEOF
+
           RESPONSE=$(curl -s -X POST https://api.anthropic.com/v1/messages \
             -H "x-api-key: ${{ secrets.ANTHROPIC_API_KEY }}" \
             -H "anthropic-version: 2023-06-01" \
             -H "Content-Type: application/json" \
-            -d '{
-              "model": "claude-opus-4-5",
-              "max_tokens": 1024,
-              "messages": [
-                {
-                  "role": "user",
-                  "content": "Generate a daily job alert summary for software engineering roles. Include 3-5 trending job titles, key skills in demand, and a motivational tip for job seekers. Keep it concise and professional."
-                }
-              ]
-            }')
-          echo "Response received"
-          MESSAGE=$(echo "$RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['content'][0]['text'])" 2>/dev/null || echo "Job alert content could not be fetched. Please check the API key and try again.")
+            -d @/tmp/payload.json)
+
+          echo "Raw API Response: $RESPONSE"
+
+          MESSAGE=$(echo "$RESPONSE" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          if 'content' in data:
+              print(data['content'][0]['text'])
+          elif 'error' in data:
+              print('API Error: ' + data['error']['message'])
+          else:
+              print('Unexpected response: ' + str(data))
+          " 2>&1)
+
           echo "message<<EOF" >> $GITHUB_OUTPUT
           echo "$MESSAGE" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
