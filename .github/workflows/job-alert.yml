@@ -11,61 +11,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Call Claude API and get job alert content
         id: claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          python3 << 'PYEOF'
-          import urllib.request
-          import json
-          import os
-
-          api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-
-          payload = {
-              "model": "claude-3-haiku-20240307",
-              "max_tokens": 1024,
-              "messages": [
-                  {
-                      "role": "user",
-                      "content": "Generate a daily job alert summary for software engineering roles. Include 3-5 trending job titles, key skills in demand, and a motivational tip for job seekers. Keep it concise and professional."
-                  }
-              ]
-          }
-
-          data = json.dumps(payload).encode("utf-8")
-
-          req = urllib.request.Request(
-              "https://api.anthropic.com/v1/messages",
-              data=data,
-              headers={
-                  "x-api-key": api_key,
-                  "anthropic-version": "2023-06-01",
-                  "Content-Type": "application/json"
-              },
-              method="POST"
-          )
-
-          try:
-              with urllib.request.urlopen(req) as response:
-                  result = json.loads(response.read().decode("utf-8"))
-                  message = result["content"][0]["text"]
-          except urllib.error.HTTPError as e:
-              error_body = e.read().decode("utf-8")
-              error_data = json.loads(error_body)
-              message = "API Error: " + error_data.get("error", {}).get("message", error_body)
-          except Exception as e:
-              message = "Unexpected Error: " + str(e)
-
-          print("Claude response received.")
-
-          github_output = os.environ.get("GITHUB_OUTPUT", "")
-          with open(github_output, "a") as f:
-              f.write("message<<EOF\n")
-              f.write(message + "\n")
-              f.write("EOF\n")
-          PYEOF
+        run: python3 scripts/fetch_alert.py
 
       - name: Send email notification
         uses: dawidd6/action-send-mail@v3
