@@ -1,4 +1,5 @@
 name: Daily Job Alert
+
 on:
   schedule:
     - cron: '00 05 * * *'  # 9:00 AM GST (UTC+4 = 05:00 UTC)
@@ -8,10 +9,55 @@ on:
 jobs:
   send-alert:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Trigger job alert
+      - name: Call Claude API and get job alert content
+        id: claude
         run: |
-          curl -X POST https://api.anthropic.com/v1/messages \
-          -H "x-api-key: ${{ secrets.ANTHROPIC_API_KEY }}" \
-          -H "Content-Type: application/json" \
-          -d '{"model":"claude-sonnet-4-20250514","max_tokens":100,"messages":[{"role":"user","content":"ping"}]}'
+          RESPONSE=$(curl -s -X POST https://api.anthropic.com/v1/messages \
+            -H "x-api-key: ${{ secrets.ANTHROPIC_API_KEY }}" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "claude-opus-4-5",
+              "max_tokens": 1024,
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "Generate a daily job alert summary for software engineering roles. Include 3-5 trending job titles, key skills in demand, and a motivational tip for job seekers. Keep it concise and professional."
+                }
+              ]
+            }')
+          echo "Response received"
+          MESSAGE=$(echo "$RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data['content'][0]['text'])" 2>/dev/null || echo "Job alert content could not be fetched. Please check the API key and try again.")
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$MESSAGE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Send email notification
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Daily Job Alert - ${{ github.run_number }} | ${{ github.run_id }}"
+          to: ${{ secrets.EMAIL_USERNAME }}
+          from: "Job Alert Bot <${{ secrets.EMAIL_USERNAME }}>"
+          body: |
+            Hello,
+
+            Here is your Daily Job Alert for today!
+
+            ---
+
+            ${{ steps.claude.outputs.message }}
+
+            ---
+
+            Workflow: ${{ github.workflow }}
+            Run: #${{ github.run_number }}
+            Repository: ${{ github.repository }}
+
+            Stay motivated and keep applying!
+            - Job Alert Automation Bot
