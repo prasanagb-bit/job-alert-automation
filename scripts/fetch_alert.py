@@ -23,7 +23,7 @@ def api_request(path, body=None):
                     raw = e.read().decode("utf-8")
                     print(f"HTTP {e.code} on {path}: {raw}", flush=True)
                     return None, raw
-except Exception as e:
+        except Exception as e:
         print(f"Exception on {path}: {e}", flush=True)
         return None, str(e)
 
