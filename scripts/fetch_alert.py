@@ -2,141 +2,114 @@ import urllib.request
 import urllib.error
 import json
 import os
+import datetime
 
 api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 github_output = os.environ.get("GITHUB_OUTPUT", "")
 
+# ── helpers ──────────────────────────────────────────────────────────────────
+
 def api_request(path, body=None):
-    url = "https://api.anthropic.com" + path
-    data = json.dumps(body).encode("utf-8") if body else None
-    req = urllib.request.Request(url=url, data=data, method="POST" if body else "GET")
-    req.add_header("x-api-key", api_key)
-    req.add_header("anthropic-version", "2023-06-01")
-    req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req) as r:
-            return json.loads(r.read().decode("utf-8")), None
-    except urllib.error.HTTPError as e:
-        raw = e.read().decode("utf-8")
-        print(f"HTTP {e.code} on {path}: {raw}", flush=True)
-        return None, raw
-    except Exception as e:
+        url = "https://api.anthropic.com" + path
+        data = json.dumps(body).encode("utf-8") if body else None
+        req = urllib.request.Request(url=url, data=data, method="POST" if body else "GET")
+        req.add_header("x-api-key", api_key)
+        req.add_header("anthropic-version", "2023-06-01")
+        req.add_header("Content-Type", "application/json")
+        try:
+                    with urllib.request.urlopen(req) as r:
+                                    return json.loads(r.read().decode("utf-8")), None
+        except urllib.error.HTTPError as e:
+                    raw = e.read().decode("utf-8")
+                    print(f"HTTP {e.code} on {path}: {raw}", flush=True)
+                    return None, raw
+except Exception as e:
         print(f"Exception on {path}: {e}", flush=True)
         return None, str(e)
 
-# Auto-discover model
+# ── model selection ───────────────────────────────────────────────────────────
+
+PREFERRED_MODELS = [
+        "claude-sonnet-4-5",
+        "claude-3-5-sonnet-20241022",
+        "claude-3-5-haiku-20241022",
+        "claude-3-haiku-20240307",
+]
+
 models_data, err = api_request("/v1/models")
+chosen_model = PREFERRED_MODELS[-1]          # safe fallback
 if models_data:
-    model_ids = [m["id"] for m in models_data.get("data", [])]
-    claude_models = [m for m in model_ids if "claude" in m.lower()]
-    chosen_model = claude_models[0] if claude_models else "claude-3-haiku-20240307"
-else:
-    chosen_model = "claude-3-haiku-20240307"
+        available = {m["id"] for m in models_data.get("data", [])}
+        for candidate in PREFERRED_MODELS:
+                    if candidate in available:
+                                    chosen_model = candidate
+                                    break
 
-print(f"Using model: {chosen_model}", flush=True)
+            print(f"Using model: {chosen_model}", flush=True)
 
-prompt = """You are a UAE IT career advisor and job market expert. You are generating a PERSONALIZED daily job alert for a specific candidate. Use their profile to tailor every section.
+# ── today's date for freshness signal ────────────────────────────────────────
 
-=== CANDIDATE PROFILE ===
-Name: Prasanna Govindasamy
-Location: Abu Dhabi, UAE
-Experience: 7+ years, currently Senior Technical Engineer at Creative Technology Solutions DMCC (Dubai)
-Current Project: ADEK Charter Schools - managing 40+ educational institutions, 40,000+ devices, 50,000+ Azure AD users
-Key Employers Served: Bloom Education, Aldar Education, Taaleem, Alef Education
+today_str = datetime.date.today().strftime("%d %B %Y")
 
-Certifications (ALL active):
-- AZ-305: Azure Solutions Architect Expert
-- AZ-104: Azure Administrator Associate
-- DP-100: Azure Data Scientist Associate
-- DP-420: Azure Cosmos DB Developer Specialty
-- MS-100: Microsoft 365 Identity and Services
-- MS-101: Microsoft 365 Mobility and Security
-- Apple Certified IT Professional (ACIT)
-- Apple Certified Support Professional (ACSP)
-- ITIL v4 Foundation
-- MCSA
+# ── system prompt (role + rules) ─────────────────────────────────────────────
 
-Core Technical Strengths:
-- Microsoft Azure: IaaS/PaaS/SaaS, VMs, Storage, Azure Policy, Disaster Recovery
-- Entra ID / Azure AD: Conditional Access, MFA, SSO, RBAC, PIM, 50,000+ users
-- Endpoint Management: Microsoft Intune, JAMF Pro, Google Admin Console, Windows Autopilot, DEP, Zero-Touch
-- Devices: Windows 10/11, Windows Server, macOS, iPadOS, ChromeOS (40,000+ devices)
-- Automation: PowerShell scripting (reduced manual tasks by 35%)
-- Monitoring: Reduced incident response time by 40%
-- ITIL v4: Incident, Change, Problem Management, SLA, RCA
-- Languages: English (Fluent), Tamil (Native), Hindi (Conversational)
-- UAE Driving License: Yes, own vehicle
+SYSTEM_PROMPT = """You are a senior UAE IT recruitment specialist and career advisor.
+Your ONLY job is to produce a structured, recruiter-style daily job alert email for the
+candidate described in the user message.
 
-Target Roles (ONLY these, no others):
-SENIOR TIER: IT Service Delivery Manager, IT Project Engineer, Senior System Engineer (Cloud & Identity), Modern Workplace / Endpoint Management Architect, Azure Cloud Architect / Solutions Architect, IT Infrastructure Engineer (server/AD/endpoint only)
-CORE TIER: IT Officer, System Administrator, IT Operations Engineer, IT Administrator
+ABSOLUTE RULES:
+1. Never fabricate apply links. If a direct URL is unavailable, write N/A and note the source.
+2. Evaluate each role with exactly 4-6 recruiter-style bullet points referencing the
+   candidate's REAL numbers (40,000 devices, 50,000 users, 40% incident reduction, 35%
+      automation gain) and REAL certifications (AZ-305, AZ-104, MS-100, MS-101, ITIL v4,
+         ACIT, ACSP, DP-420, DP-100, MCSA).
+         3. Output a CSV-compatible job table using the pipe-delimited format specified.
+         4. Scope: UAE-only roles, last 7 days where known.
+         5. Focus solely on the candidate's target role categories — no off-topic suggestions.
+         6. Tone: professional, direct, recruiter-level — no generic filler."""
 
-=== OUTPUT FORMAT ===
+# ── main user prompt ──────────────────────────────────────────────────────────
 
-Generate the email in this EXACT structure:
+prompt = f"""Today's date: {today_str}
 
-# Daily UAE IT Job Alert — Prasanna's Personalized Alert
+    === CANDIDATE CV SUMMARY ===
+    Name: Prasanna Govindasamy
+    Location: Abu Dhabi, UAE | +971 52-2450153
+    Current Role: Senior Technical Engineer, Creative Technology Solutions DMCC (Dubai) — Jul 2021–Present
+    Project: ADEK Charter Schools — 40+ institutions, 40,000+ devices (Windows/macOS/iPadOS/ChromeOS),
+             50,000+ Azure AD/Entra ID users
+             Key Clients: Bloom Education, Aldar Education, Taaleem, Alef Education, New Century Education
+             Education: B.E. Electronics & Communications, Anna University 2014
 
-*Senior IT Engineer | Azure Architect | Endpoint Management Specialist | Abu Dhabi, UAE*
+             CERTIFICATIONS (all active):
+             AZ-305 | AZ-104 | DP-100 | DP-420 | MS-100 | MS-101 | ACIT | ACSP | ITIL v4 Foundation | MCSA
 
----
+             CORE SKILLS:
+             - Azure: IaaS/PaaS/SaaS, VMs, Storage, Entra ID, Conditional Access, MFA, SSO, RBAC, PIM,
+                      Azure Policy, Disaster Recovery, Azure Site Recovery
+                      - Endpoint: Intune, JAMF Pro, Apple School Manager, Google Admin Console, Autopilot,
+                                  Apple DEP, Zero-Touch Deployment, MAM, MDM
+                                  - OS: Windows 10/11 Enterprise, Windows Server, macOS, iPadOS, ChromeOS
+                                  - Automation: PowerShell (35% manual task reduction), Batch scripting
+                                  - ITSM: ITIL v4, Incident/Change/Problem Mgmt, SLA, RCA
+                                  - Networking: VPN, Firewall, NSG, Virtual Networks
+                                  - Monitoring: Reduced incident response time by 40%
+                                  - Languages: English (Fluent), Tamil (Native), Hindi (Conversational)
+                                  - UAE Driving License + own vehicle
 
-## Today's Priority Roles for Your Profile
+                                  TARGET ROLES:
+                                  SENIOR TIER: IT Service Delivery Manager | IT Project Engineer | Senior Systems Engineer
+                                               (Cloud & Identity) | Modern Workplace / Endpoint Management Architect |
+                                                            Azure Cloud / Solutions Architect | IT Infrastructure Engineer
+                                                            CORE TIER: IT Officer | System Administrator | IT Operations Engineer | IT Administrator
 
-For each of 4-5 roles (pick the ones currently most active in UAE hiring market), format EXACTLY as:
+                                                            === INSTRUCTIONS ===
 
----
+                                                            Produce a daily job alert email in the following EXACT sections:
 
-### [Role Title]
-**Market Demand:** [Hot / Strong / Steady]
-**Best Fit Employers in UAE:** [2-3 specific company types or named companies in UAE]
-**Your Target Salary:** AED [X] – [Y]/month *(Senior level, 7+ years)*
+                                                            ---
 
-**Why You're a Strong Candidate:**
-Based on Prasanna's profile, list 3 specific resume strengths that make him competitive for THIS role (reference his actual certifications, numbers like 40,000 devices, 50,000 users, specific tools).
+                                                            ## SECTION 1 — SUMMARY ASSESSMENT
 
-**Skill Gap to Address:**
-One specific skill or certification he could add to become even stronger for this role in UAE.
-
-**Where to Apply Today:**
-Name 2-3 specific UAE job boards or company career pages best for this role.
-
----
-
-## Your Certification Power in UAE Market
-
-Create a short table showing which of Prasanna's certifications are most valued by UAE employers RIGHT NOW, with a one-line market note for each.
-
-## This Week's UAE Market Signal
-
-One paragraph on current IT hiring activity in UAE specifically relevant to his specialization (Azure, Intune, Entra ID, endpoint management, education/government sector).
-
-## Your Next Career Move Recommendation
-
-Based on his 7 years experience, AZ-305, ITIL v4, and 40,000-device scale — give one specific, actionable recommendation for his next role or career step in UAE (be direct and specific, not generic).
-
----
-Keep the tone professional, direct, and personalized. Reference his actual experience numbers and certifications throughout — not generic advice."""
-
-payload = {
-    "model": chosen_model,
-    "max_tokens": 1500,
-    "messages": [{
-        "role": "user",
-        "content": prompt
-    }]
-}
-
-result, err = api_request("/v1/messages", payload)
-if result and "content" in result:
-    message = result["content"][0]["text"]
-    print("SUCCESS - Got Claude response", flush=True)
-else:
-    message = f"API Error: {err}"
-    print(f"Failed - {err}", flush=True)
-
-if github_output:
-    with open(github_output, "a", encoding="utf-8") as f:
-        f.write("message<<EOF\n")
-        f.write(message + "\n")
-        f.write("EOF\n")
+                                                            Write a concise 5-bullet overall market assessment for Prasanna's profile today, referencing
+                                                            his actual metrics and certifications. Cover: overall positionin
